@@ -5,11 +5,11 @@ from openpyxl import writer
 from openpyxl import reader
 
 # Load the Excel sheet into a pandas DataFrame
-file_path = '/Users/KatMcMillan/Documents/Documents/Personal/NPS.xlsx'
-sheet_name = 'Original_Swatches'  # Update with your sheet name
-file_output = '/Users/KatMcMillan/Documents/Documents/Personal/NPS_Selections.xlsx'
+file_path = '.xlsx'
+sheet_name = ''  # Update with your sheet name
+file_output = '.xlsx'
 df = pd.read_excel(file_path, sheet_name, engine='openpyxl')
-previous_selection_df = pd.read_excel(file_output, sheet_name="Selections", engine="openpyxl")
+previous_selection_df = pd.read_excel(file_output, sheet_name="Selections", engine="openpyxl") #adjust sheet name as needed
 previous_selections = set({num for num in previous_selection_df["Number"].unique()})
 
 # Initialize a set to keep track of previously selected polish Numbers and a list for past selections
@@ -32,7 +32,7 @@ def select_random_polish(df, previous_selections):
     
     return random_polish
 
-# Select a random polish without repeating previous 15 selections
+# Select a random polish without repeating previous 15 selections; adjust based on column names
 random_polish = select_random_polish(df, previous_selections)
 if random_polish is not None:
     print("Random Polish:", random_polish.iloc[0]['Brand'], random_polish.iloc[0]['Shade Name'])
