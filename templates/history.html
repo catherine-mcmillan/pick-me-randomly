@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Voting History</h1>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Brand</th>
+                        <th>Shade Name</th>
+                        <th>Number</th>
+                        <th>Votes</th>
+                        <th>Comments</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for selection in selections %}
+                    <tr>
+                        <td>{{ selection.Date }}</td>
+                        <td>{{ selection.Brand }}</td>
+                        <td>{{ selection.Shade Name }}</td>
+                        <td>{{ selection.Number }}</td>
+                        <td>{{ selection.Votes }}</td>
+                        <td>{{ selection.Comments }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

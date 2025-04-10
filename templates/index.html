@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Select Your Favorite Polish</h1>
+        <p class="lead">Choose from these randomly selected polishes:</p>
+    </div>
+</div>
+
+<div class="row">
+    {% for polish in polishes %}
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">{{ polish.Brand }}</h5>
+                <h6 class="card-subtitle mb-2 text-muted">{{ polish.Shade Name }}</h6>
+                <p class="card-text">Number: {{ polish.Number }}</p>
+                <form action="{{ url_for('vote') }}" method="post">
+                    <input type="hidden" name="polish_number" value="{{ polish.Number }}">
+                    <div class="mb-3">
+                        <label for="comment{{ polish.Number }}" class="form-label">Add a comment (optional):</label>
+                        <textarea class="form-control" id="comment{{ polish.Number }}" name="comment"
+                            rows="2"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Vote for this polish</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
