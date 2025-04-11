@@ -6,7 +6,11 @@ import os
 from datetime import datetime
 import time
 import logging
-import sqlite3
+import psycopg2
+from psycopg2 import pool
+from psycopg2.extras import RealDictCursor
+from contextlib import contextmanager
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,30 +30,74 @@ COLLECTION_SHEET = 'Original_Swatches'
 HISTORY_SHEET = 'Sheet1'
 SELECTIONS_SHEET = 'Selections'
 
-# Define the absolute path for the database
-DB_PATH = os.path.join(os.path.dirname(__file__), 'votes.db')
+# Check if we're running in a container
+IS_CONTAINER = os.getenv('IS_CONTAINER', 'false').lower() == 'true'
 
-# Connect to SQLite database
-conn = sqlite3.connect(DB_PATH)
-cursor = conn.cursor()
+# Get database URL from environment
+DATABASE_URL = os.getenv('DATABASE_URL')
 
-# Create table for votes
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS votes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    number TEXT,
-    brand TEXT,
-    shade_name TEXT,
-    finish TEXT,
-    collection TEXT,
-    winner_number TEXT,
-    winner_brand TEXT,
-    winner_shade_name TEXT,
-    winner_finish TEXT,
-    winner_collection TEXT
-)
-''')
-conn.commit()
+# Create a connection pool
+connection_pool = None
+
+def init_connection_pool():
+    global connection_pool
+    if connection_pool is None:
+        try:
+            connection_pool = psycopg2.pool.SimpleConnectionPool(
+                1,  # min connections
+                10,  # max connections
+                DATABASE_URL
+            )
+            logging.debug("Connection pool initialized successfully")
+        except Exception as e:
+            logging.error(f"Error initializing connection pool: {str(e)}")
+            raise
+
+@contextmanager
+def get_db_connection():
+    """Get a database connection from the pool"""
+    if connection_pool is None:
+        init_connection_pool()
+    
+    conn = connection_pool.getconn()
+    try:
+        yield conn
+    finally:
+        connection_pool.putconn(conn)
+
+def init_database():
+    """Initialize the database and create necessary tables"""
+    try:
+        # Connect to the database
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        
+        # Create votes table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS votes (
+            id SERIAL PRIMARY KEY,
+            number TEXT,
+            brand TEXT,
+            shade_name TEXT,
+            finish TEXT,
+            collection TEXT,
+            winner_number TEXT,
+            winner_brand TEXT,
+            winner_shade_name TEXT,
+            winner_finish TEXT,
+            winner_collection TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
+        logging.debug("Database tables initialized successfully")
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        logging.error(f"Error initializing database: {str(e)}")
+        raise
 
 @st.cache_data
 def load_data():
@@ -104,58 +152,53 @@ def get_random_polishes(collection_df, used_numbers, count=5):
     random_indices = random.sample(list(available_polishes.index), count)
     return available_polishes.loc[random_indices]
 
-def save_vote(selected_polish):
-    """Save the vote to the selections file"""
-    _, selections_df, _, _ = load_data()
-    
-    # Ensure Number column is string type
-    selected_polish['Number'] = str(selected_polish['Number'])
-    
-    # Check if the polish has been selected before
-    if selected_polish['Number'] in selections_df['Number'].values:
-        # Increment vote count
-        selections_df.loc[selections_df['Number'] == selected_polish['Number'], 'Votes'] += 1
-    else:
-        # Add new selection with initial vote
-        new_selection = pd.DataFrame([{
-            'Number': selected_polish['Number'],
-            'Votes': 1
-        }])
-        selections_df = pd.concat([selections_df, new_selection], ignore_index=True)
-    
-    # Save to Excel using openpyxl
-    with pd.ExcelWriter(SELECTIONS_FILE, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-        selections_df.to_excel(writer, sheet_name=SELECTIONS_SHEET, index=False)
-    
-    st.cache_data.clear()
-
 def record_vote(selected_polish, polishes):
     try:
-        with sqlite3.connect(DB_PATH) as conn:  # Use the absolute path
-            cursor = conn.cursor()
-            for polish in polishes:
-                logging.debug(f"Attempting to insert vote for polish: {polish['Number']}")
-                cursor.execute('''
-                INSERT INTO votes (number, brand, shade_name, finish, collection, winner_number, winner_brand, winner_shade_name, winner_finish, winner_collection)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    polish['Number'], polish['Brand'], polish['Shade Name'], polish['Finish'], polish.get('Collection', ''),
-                    selected_polish['Number'], selected_polish['Brand'], selected_polish['Shade Name'], selected_polish['Finish'], selected_polish.get('Collection', '')
-                ))
-            conn.commit()
-            logging.debug("Vote committed to the database.")
-            
-            # Verify the vote is saved
-            cursor.execute('SELECT COUNT(*) FROM votes')
-            count = cursor.fetchone()[0]
-            logging.debug(f"Total votes in database: {count}")
-            st.success(f"Vote recorded! Total votes: {count}")
+        logging.debug("=== Starting record_vote function ===")
+        logging.debug(f"Selected polish: {selected_polish}")
+        logging.debug(f"All polishes in round: {polishes}")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                try:
+                    for polish in polishes:
+                        logging.debug(f"Processing vote for polish: {polish['Number']}")
+                        cursor.execute('''
+                        INSERT INTO votes (number, brand, shade_name, finish, collection, 
+                                         winner_number, winner_brand, winner_shade_name, 
+                                         winner_finish, winner_collection)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ''', (
+                            polish['Number'], polish['Brand'], polish['Shade Name'], 
+                            polish['Finish'], polish.get('Collection', ''),
+                            selected_polish['Number'], selected_polish['Brand'], 
+                            selected_polish['Shade Name'], selected_polish['Finish'], 
+                            selected_polish.get('Collection', '')
+                        ))
+                        logging.debug(f"Successfully inserted vote for polish {polish['Number']}")
+                    
+                    conn.commit()
+                    logging.debug("Successfully committed all votes to database")
+                    
+                    # Verify the vote is saved
+                    cursor.execute('SELECT COUNT(*) FROM votes')
+                    count = cursor.fetchone()[0]
+                    logging.debug(f"Total votes in database after commit: {count}")
+                    
+                    st.success(f"Vote recorded! Total votes: {count}")
+                    
+                except Exception as e:
+                    conn.rollback()
+                    logging.error(f"Error in record_vote: {str(e)}")
+                    st.error("Failed to record vote. Please try again.")
+                    raise
+                    
     except Exception as e:
-        logging.error(f"Error recording vote: {e}")
+        logging.error(f"Error in record_vote: {str(e)}")
         st.error("Failed to record vote. Please try again.")
 
 def calculate_statistics():
-    with sqlite3.connect(DB_PATH) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         
         # Calculate most popular polishes
@@ -187,27 +230,6 @@ def calculate_statistics():
         finish_stats = cursor.fetchall()
         
     return popular_polishes, brand_stats, finish_stats
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)  # Use the absolute path
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS votes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        number TEXT,
-        brand TEXT,
-        shade_name TEXT,
-        finish TEXT,
-        collection TEXT,
-        winner_number TEXT,
-        winner_brand TEXT,
-        winner_shade_name TEXT,
-        winner_finish TEXT,
-        winner_collection TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
 
 def display_statistics():
     popular_polishes, brand_stats, finish_stats = calculate_statistics()
@@ -241,8 +263,70 @@ def display_statistics():
         use_container_width=True
     )
 
+def verify_database():
+    """Verify database connection and table structure"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Check if table exists
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'votes'
+                    );
+                """)
+                table_exists = cursor.fetchone()[0]
+                
+                if not table_exists:
+                    logging.error("Votes table does not exist")
+                    return False
+                
+                # Check if we can insert and read
+                test_data = {
+                    'number': 'TEST',
+                    'brand': 'TEST',
+                    'shade_name': 'TEST',
+                    'finish': 'TEST',
+                    'collection': 'TEST',
+                    'winner_number': 'TEST',
+                    'winner_brand': 'TEST',
+                    'winner_shade_name': 'TEST',
+                    'winner_finish': 'TEST',
+                    'winner_collection': 'TEST'
+                }
+                
+                cursor.execute("""
+                    INSERT INTO votes (number, brand, shade_name, finish, collection,
+                                     winner_number, winner_brand, winner_shade_name,
+                                     winner_finish, winner_collection)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id;
+                """, tuple(test_data.values()))
+                
+                inserted_id = cursor.fetchone()[0]
+                conn.commit()
+                
+                cursor.execute("SELECT COUNT(*) FROM votes WHERE id = %s", (inserted_id,))
+                count = cursor.fetchone()[0]
+                
+                if count == 1:
+                    logging.debug("Database verification successful")
+                    return True
+                else:
+                    logging.error("Database verification failed: Could not read inserted data")
+                    return False
+                    
+    except Exception as e:
+        logging.error(f"Database verification failed: {str(e)}")
+        return False
+
 def main():
-    init_db()  # Initialize the database
+    # Initialize database and verify connection
+    init_database()
+    if not verify_database():
+        st.error("Database initialization failed. Please check the logs.")
+        return
+    
     st.title("💅 Pick Me Randomly")
     
     # Sidebar navigation
@@ -264,20 +348,31 @@ def main():
                     # Only show Collection Info if Notes is not empty
                     collection_info = f"<p><strong>Collection Info:</strong> {polish['Notes']}</p>" if polish['Notes'] else ""
                     st.markdown(f"""
-                    <div style='padding: 20px; border-radius: 10px; background-color: #f8f9fa; margin-bottom: 20px;'>
-                        <h3>{polish['Brand']}</h3>
-                        <p><strong>Shade:</strong> {polish['Shade Name']}</p>
-                        <p><strong>Finish:</strong> {polish['Finish']}</p>
-                        <p><strong>Description:</strong> {polish['Description']}</p>
+                    <div style='
+                        padding: 20px; 
+                        border-radius: 10px; 
+                        background-color: var(--background-color);
+                        border: 1px solid var(--border-color);
+                        margin-bottom: 20px;
+                        color: var(--text-color);
+                    '>
+                        <h3 style='color: var(--text-color);'>{polish['Brand']}</h3>
+                        <p><strong style='color: var(--text-color);'>Shade:</strong> {polish['Shade Name']}</p>
+                        <p><strong style='color: var(--text-color);'>Finish:</strong> {polish['Finish']}</p>
+                        <p><strong style='color: var(--text-color);'>Description:</strong> {polish['Description']}</p>
                         {collection_info}
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    if st.button("Select this polish", key=f"select_{polish['Number']}"):
+                    # Make button key unique by including the index
+                    if st.button("Select this polish", key=f"select_{polish['Number']}_{i}"):
+                        logging.debug(f"Button clicked for polish {polish['Number']}")
+                        logging.debug("Calling record_vote function")
                         record_vote(polish, random_polishes.to_dict('records'))
+                        logging.debug("Vote recording completed")
                         st.success("Selection recorded! Refreshing...")
                         time.sleep(1)
-                        st.experimental_rerun()
+                        st.rerun()
     
     elif page == "History":
         _, _, _, history_df = load_data()
@@ -358,7 +453,7 @@ def main():
     elif page == "Database":
         st.subheader("Database View")
         
-        with sqlite3.connect(DB_PATH) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM votes")
             rows = cursor.fetchall()
