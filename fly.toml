@@ -15,4 +15,23 @@ primary_region = "lax"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 1024 
+  memory_mb = 1024
+
+[env]
+  PORT = "8501"
+  IS_CONTAINER = "true"
+  PYTHONUNBUFFERED = "1"
+  STREAMLIT_SERVER_PORT = "8501"
+  STREAMLIT_SERVER_ADDRESS = "0.0.0.0"
+
+# Database configuration
+  DATABASE_HOST = "your-db-host"
+  DATABASE_PORT = "5432"
+  DATABASE_USER = "your-db-user"
+  DATABASE_PASSWORD = "your-db-password"
+  DATABASE_NAME = "your-db-name"
+  DATABASE_URL = "postgres://${DATABASE_USER}:${DATABASE_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
+
+[mounts]
+  source = "data"
+  destination = "/app/data" 
