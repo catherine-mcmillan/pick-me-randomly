@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
@@ -22,7 +23,9 @@ RUN echo '#!/bin/bash\n\
     sleep 1\n\
     done\n\
     echo "Database is ready!"\n\
-    python -c "import psycopg2; conn = psycopg2.connect(\"$DATABASE_URL\"); conn.close()"\n\
+    # Initialize database schema\n\
+    psql $DATABASE_URL -f /app/scripts/db/init.sql\n\
+    # Start the application\n\
     streamlit run app.py --logger.level=DEBUG' > /app/start.sh && \
     chmod +x /app/start.sh
 

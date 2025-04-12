@@ -47,3 +47,4 @@ Thumbs.db
 # Add to .gitignore
 *.sql
 data/
+scripts/db/init.sql
