@@ -463,7 +463,9 @@ def vote(selected_polish, all_polishes):
             raise ValueError("Invalid polishes data")
         
         # Record votes for all polishes in the round
+        logging.debug("Calling record_vote function")
         record_vote(selected_polish, all_polishes)
+        logging.debug("record_vote function completed")
         
         # Log success
         logging.debug("Vote recording completed successfully")
@@ -538,8 +540,14 @@ def main():
                             st.session_state.last_button_clicked = button_key
                             logging.debug(f"Updated session state: {st.session_state}")
                             
+                            # Log the data being passed to vote
+                            logging.debug(f"Selected polish data: {polish}")
+                            logging.debug(f"All polishes data: {random_polishes.to_dict('records')}")
+                            
+                            # Call the vote function with the selected polish and all polishes
                             logging.debug("Calling vote function")
                             vote(polish, random_polishes.to_dict('records'))
+                            logging.debug("Vote function completed")
                             
                             # Show success message
                             st.success("Selection recorded! Refreshing...")
