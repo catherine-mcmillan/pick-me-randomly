@@ -33,8 +33,13 @@ SELECTIONS_SHEET = 'Selections'
 # Check if we're running in a container
 IS_CONTAINER = os.getenv('IS_CONTAINER', 'false').lower() == 'true'
 
-# Get database URL from environment
+# Get database configuration from environment variables
 DATABASE_URL = os.getenv('DATABASE_URL')
+DATABASE_HOST = os.getenv('DATABASE_HOST')
+DATABASE_PORT = os.getenv('DATABASE_PORT')
+DATABASE_USER = os.getenv('DATABASE_USER')
+DATABASE_PASSWORD = os.getenv('DATABASE_PASSWORD')
+DATABASE_NAME = os.getenv('DATABASE_NAME')
 
 # Create a connection pool
 connection_pool = None
@@ -46,7 +51,11 @@ def init_connection_pool():
             connection_pool = psycopg2.pool.SimpleConnectionPool(
                 1,  # min connections
                 10,  # max connections
-                DATABASE_URL
+                host=DATABASE_HOST,
+                port=DATABASE_PORT,
+                user=DATABASE_USER,
+                password=DATABASE_PASSWORD,
+                dbname=DATABASE_NAME
             )
             logging.debug("Connection pool initialized successfully")
         except Exception as e:
@@ -68,8 +77,14 @@ def get_db_connection():
 def init_database():
     """Initialize the database and create necessary tables"""
     try:
-        # Connect to the database
-        conn = psycopg2.connect(DATABASE_URL)
+        # Connect to the database using TCP parameters
+        conn = psycopg2.connect(
+            host=DATABASE_HOST,
+            port=DATABASE_PORT,
+            user=DATABASE_USER,
+            password=DATABASE_PASSWORD,
+            dbname=DATABASE_NAME
+        )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
         

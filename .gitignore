@@ -45,5 +45,5 @@ ENV/
 Thumbs.db
 
 # Add to .gitignore
-*.sql
+
 data/
