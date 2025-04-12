@@ -233,6 +233,13 @@ def record_vote(selected_polish, polishes):
         logging.debug(f"Selected polish: {selected_polish}")
         logging.debug(f"All polishes in round: {polishes}")
         
+        # Validate input data
+        if not selected_polish or not isinstance(selected_polish, dict):
+            raise ValueError("Invalid selected polish data")
+            
+        if not polishes or not isinstance(polishes, list):
+            raise ValueError("Invalid polishes data")
+        
         # Get database connection
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -244,13 +251,12 @@ def record_vote(selected_polish, polishes):
                 for polish in polishes:
                     logging.debug(f"Processing vote for polish: {polish}")
                     
-                    # Insert vote record
-                    cursor.execute('''
-                    INSERT INTO votes (
-                        number, brand, shade_name, finish, collection,
-                        winner_number, winner_brand, winner_shade_name, winner_finish, winner_collection
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ''', (
+                    # Log the exact data being inserted
+                    logging.debug(f"Inserting vote for polish {polish['Number']} ({polish['Brand']} - {polish['Shade Name']})")
+                    logging.debug(f"Selected winner: {selected_polish['Number']} ({selected_polish['Brand']} - {selected_polish['Shade Name']})")
+                    
+                    # Log the exact SQL parameters being used
+                    params = (
                         polish['Number'],
                         polish['Brand'],
                         polish['Shade Name'],
@@ -261,7 +267,16 @@ def record_vote(selected_polish, polishes):
                         selected_polish['Shade Name'],
                         selected_polish['Finish'],
                         selected_polish.get('Collection', '')
-                    ))
+                    )
+                    logging.debug(f"SQL parameters: {params}")
+                    
+                    # Insert vote record
+                    cursor.execute('''
+                    INSERT INTO votes (
+                        number, brand, shade_name, finish, collection,
+                        winner_number, winner_brand, winner_shade_name, winner_finish, winner_collection
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', params)
                 
                 # Commit the transaction
                 conn.commit()
@@ -271,6 +286,14 @@ def record_vote(selected_polish, polishes):
                 after_count = cursor.fetchone()[0]
                 logging.debug(f"Votes count after insert: {after_count}")
                 logging.debug(f"Number of votes added: {after_count - before_count}")
+                
+                # Verify the most recent vote
+                cursor.execute('''
+                SELECT number, brand, shade_name, winner_number, winner_brand, winner_shade_name
+                FROM votes ORDER BY created_at DESC LIMIT 1
+                ''')
+                last_vote = cursor.fetchone()
+                logging.debug(f"Most recent vote: {last_vote}")
                 
     except Exception as e:
         logging.error(f"Error in record_vote: {str(e)}")
@@ -450,7 +473,14 @@ def vote(selected_polish, all_polishes):
         raise  # Re-raise the exception to be handled by the caller
 
 def main():
+    # Initialize session state
+    if 'last_button_clicked' not in st.session_state:
+        st.session_state.last_button_clicked = None
+    
     # Initialize database and verify connection
+    logging.debug("=== Starting main function ===")
+    logging.debug(f"Session state: {st.session_state}")
+    
     init_database()
     cleanup_test_data()  # Clean up any test data before starting
     if not verify_database():
@@ -461,10 +491,13 @@ def main():
     
     # Sidebar navigation
     page = st.sidebar.radio("Navigation", ["Vote", "History", "Statistics", "Database"])
+    logging.debug(f"Selected page: {page}")
     
     if page == "Vote":
+        logging.debug("Loading data for Vote page")
         collection_df, _, used_numbers, _ = load_data()
         random_polishes = get_random_polishes(collection_df, used_numbers)
+        logging.debug(f"Generated {len(random_polishes)} random polishes")
         
         st.subheader("Select Your Favorite Polish")
         st.write("Choose from these randomly selected polishes:")
@@ -496,14 +529,16 @@ def main():
                     
                     # Create a unique key for the button
                     button_key = f"select_{polish['Number']}_{i}"
+                    logging.debug(f"Created button with key: {button_key}")
                     
                     # Check if this button was clicked
                     if st.button("Select this polish", key=button_key):
                         try:
                             logging.debug(f"Button clicked for polish {polish['Number']}")
-                            logging.debug("Calling vote function")
+                            st.session_state.last_button_clicked = button_key
+                            logging.debug(f"Updated session state: {st.session_state}")
                             
-                            # Call the vote function with the selected polish and all polishes
+                            logging.debug("Calling vote function")
                             vote(polish, random_polishes.to_dict('records'))
                             
                             # Show success message
