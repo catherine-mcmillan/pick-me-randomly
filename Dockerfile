@@ -23,8 +23,8 @@ RUN echo '#!/bin/bash\n\
     sleep 1\n\
     done\n\
     echo "Database is ready!"\n\
-    # Initialize database schema\n\
-    psql $DATABASE_URL -f /app/scripts/db/init.sql\n\
+    # Initialize database schema using TCP connection\n\
+    PGPASSWORD=$DATABASE_PASSWORD psql -h $DATABASE_HOST -p $DATABASE_PORT -U $DATABASE_USER -d $DATABASE_NAME -f /app/scripts/db/init.sql\n\
     # Start the application\n\
     streamlit run app.py --logger.level=DEBUG' > /app/start.sh && \
     chmod +x /app/start.sh
