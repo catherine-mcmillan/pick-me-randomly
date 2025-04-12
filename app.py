@@ -48,16 +48,39 @@ def init_connection_pool():
     global connection_pool
     if connection_pool is None:
         try:
+            logging.debug("=== Initializing connection pool ===")
+            logging.debug(f"Using DATABASE_URL for connection")
+            
             connection_pool = psycopg2.pool.SimpleConnectionPool(
                 1,  # min connections
                 10,  # max connections
-                host=DATABASE_HOST,
-                port=DATABASE_PORT,
-                user=DATABASE_USER,
-                password=DATABASE_PASSWORD,
-                dbname=DATABASE_NAME
+                dsn=DATABASE_URL
             )
             logging.debug("Connection pool initialized successfully")
+            
+            # Test the connection
+            with connection_pool.getconn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT version();")
+                    version = cursor.fetchone()
+                    logging.debug(f"PostgreSQL version: {version}")
+                    
+                    # Check if votes table exists
+                    cursor.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_name = 'votes'
+                        );
+                    """)
+                    table_exists = cursor.fetchone()[0]
+                    logging.debug(f"Votes table exists: {table_exists}")
+                    
+                    if table_exists:
+                        # Get current count of votes
+                        cursor.execute("SELECT COUNT(*) FROM votes")
+                        count = cursor.fetchone()[0]
+                        logging.debug(f"Current number of votes in database: {count}")
+                        
         except Exception as e:
             logging.error(f"Error initializing connection pool: {str(e)}")
             raise
@@ -70,45 +93,67 @@ def get_db_connection():
     
     conn = connection_pool.getconn()
     try:
+        logging.debug("Getting connection from pool")
         yield conn
+    except Exception as e:
+        logging.error(f"Error getting connection: {str(e)}")
+        raise
     finally:
+        logging.debug("Returning connection to pool")
         connection_pool.putconn(conn)
 
 def init_database():
     """Initialize the database and create necessary tables"""
     try:
-        # Connect to the database using TCP parameters
-        conn = psycopg2.connect(
-            host=DATABASE_HOST,
-            port=DATABASE_PORT,
-            user=DATABASE_USER,
-            password=DATABASE_PASSWORD,
-            dbname=DATABASE_NAME
-        )
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
+        logging.debug("=== Starting database initialization ===")
+        logging.debug(f"Using DATABASE_URL for initialization")
         
-        # Create votes table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS votes (
-            id SERIAL PRIMARY KEY,
-            number TEXT,
-            brand TEXT,
-            shade_name TEXT,
-            finish TEXT,
-            collection TEXT,
-            winner_number TEXT,
-            winner_brand TEXT,
-            winner_shade_name TEXT,
-            winner_finish TEXT,
-            winner_collection TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
+        # Initialize the connection pool if not already done
+        if connection_pool is None:
+            init_connection_pool()
         
-        logging.debug("Database tables initialized successfully")
-        cursor.close()
-        conn.close()
+        # Get a connection from the pool
+        with get_db_connection() as conn:
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            
+            # Create votes table
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS votes (
+                id SERIAL PRIMARY KEY,
+                number TEXT,
+                brand TEXT,
+                shade_name TEXT,
+                finish TEXT,
+                collection TEXT,
+                winner_number TEXT,
+                winner_brand TEXT,
+                winner_shade_name TEXT,
+                winner_finish TEXT,
+                winner_collection TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+            
+            # Verify table creation
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'votes'
+                );
+            """)
+            table_exists = cursor.fetchone()[0]
+            logging.debug(f"Votes table exists: {table_exists}")
+            
+            if table_exists:
+                # Get current count of votes
+                cursor.execute("SELECT COUNT(*) FROM votes")
+                count = cursor.fetchone()[0]
+                logging.debug(f"Current number of votes in database: {count}")
+            
+            logging.debug("Database tables initialized successfully")
+            cursor.close()
+            conn.close()
         
     except Exception as e:
         logging.error(f"Error initializing database: {str(e)}")
@@ -118,8 +163,14 @@ def init_database():
 def load_data():
     """Load and return the polish collection, history, and previous selections"""
     with st.spinner('Loading data...'):
-        # Load the full collection
-        collection_df = pd.read_excel(COLLECTION_FILE, sheet_name=COLLECTION_SHEET, engine='openpyxl')
+        try:
+            # Load the full collection
+            collection_df = pd.read_excel(COLLECTION_FILE, sheet_name=COLLECTION_SHEET, engine='openpyxl')
+        except Exception as e:
+            logging.error(f"Error loading collection file: {str(e)}")
+            # Create an empty DataFrame with required columns
+            collection_df = pd.DataFrame(columns=['Number', 'Brand', 'Shade Name', 'Description', 'Finish', 'Notes'])
+        
         # Ensure all necessary columns are present
         expected_columns = ['Number', 'Brand', 'Shade Name', 'Description', 'Finish', 'Notes']
         for col in expected_columns:
@@ -128,29 +179,37 @@ def load_data():
         # Replace all NaN values with empty strings
         collection_df = collection_df.fillna('')
         
-        # Load history data
-        history_df = pd.read_excel(COLLECTION_FILE, sheet_name=HISTORY_SHEET, engine='openpyxl', usecols='F:N')
-        history_df.columns = ['Date', 'Number', 'Brand', 'Shade Name', 'Description', 'Finish', 'L', 'M', 'Notes']
-        # Clean up the data
-        history_df['Brand'] = history_df['Brand'].fillna('Unknown')
-        history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce')
-        # Remove entries without dates
-        history_df = history_df.dropna(subset=['Date'])
+        try:
+            # Load history data
+            history_df = pd.read_excel(COLLECTION_FILE, sheet_name=HISTORY_SHEET, engine='openpyxl', usecols='F:N')
+            history_df.columns = ['Date', 'Number', 'Brand', 'Shade Name', 'Description', 'Finish', 'L', 'M', 'Notes']
+            # Clean up the data
+            history_df['Brand'] = history_df['Brand'].fillna('Unknown')
+            history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce')
+            # Remove entries without dates
+            history_df = history_df.dropna(subset=['Date'])
+        except Exception as e:
+            logging.error(f"Error loading history file: {str(e)}")
+            # Create an empty DataFrame with required columns
+            history_df = pd.DataFrame(columns=['Date', 'Number', 'Brand', 'Shade Name', 'Description', 'Finish', 'L', 'M', 'Notes'])
+        
         # Replace all remaining NaN values with empty strings
         history_df = history_df.fillna('')
         
-        # Load previous selections (just numbers)
         try:
+            # Load previous selections (just numbers)
             selections_df = pd.read_excel(SELECTIONS_FILE, sheet_name=SELECTIONS_SHEET, engine='openpyxl')
-            # Ensure we have the Number column
-            if 'Number' not in selections_df.columns:
-                selections_df = pd.DataFrame(columns=['Number', 'Votes'])
-            if 'Votes' not in selections_df.columns:
-                selections_df['Votes'] = 1
-            # Replace all NaN values with empty strings
-            selections_df = selections_df.fillna('')
-        except:
+        except Exception as e:
+            logging.error(f"Error loading selections file: {str(e)}")
             selections_df = pd.DataFrame(columns=['Number', 'Votes'])
+        
+        # Ensure we have the Number column
+        if 'Number' not in selections_df.columns:
+            selections_df = pd.DataFrame(columns=['Number', 'Votes'])
+        if 'Votes' not in selections_df.columns:
+            selections_df['Votes'] = 1
+        # Replace all NaN values with empty strings
+        selections_df = selections_df.fillna('')
             
         # Get the list of used numbers
         used_numbers = set(selections_df['Number'].unique())
@@ -173,40 +232,91 @@ def record_vote(selected_polish, polishes):
         logging.debug(f"Selected polish: {selected_polish}")
         logging.debug(f"All polishes in round: {polishes}")
         
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                try:
-                    for polish in polishes:
-                        logging.debug(f"Processing vote for polish: {polish['Number']}")
+        # Validate input data
+        if not selected_polish or not isinstance(selected_polish, dict):
+            logging.error("Invalid selected_polish data")
+            st.error("Invalid selection data. Please try again.")
+            return
+        
+        if not polishes or not isinstance(polishes, list):
+            logging.error("Invalid polishes data")
+            st.error("Invalid polish data. Please try again.")
+            return
+        
+        # Get database connection
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    try:
+                        # Get current count before insert
+                        cursor.execute('SELECT COUNT(*) FROM votes')
+                        before_count = cursor.fetchone()[0]
+                        logging.debug(f"Votes count before insert: {before_count}")
+                        
+                        for polish in polishes:
+                            logging.debug(f"Processing vote for polish: {polish}")
+                            
+                            # Validate polish data
+                            required_fields = ['Number', 'Brand', 'Shade Name', 'Finish']
+                            if not all(field in polish for field in required_fields):
+                                logging.error(f"Missing required fields in polish data: {polish}")
+                                continue
+                            
+                            # Log the exact data being inserted
+                            logging.debug(f"Inserting vote for polish {polish['Number']} ({polish['Brand']} - {polish['Shade Name']})")
+                            logging.debug(f"Selected winner: {selected_polish['Number']} ({selected_polish['Brand']} - {selected_polish['Shade Name']})")
+                            
+                            # Log the exact SQL parameters being used
+                            params = (
+                                polish['Number'], polish['Brand'], polish['Shade Name'], 
+                                polish['Finish'], polish.get('Collection', ''),
+                                selected_polish['Number'], selected_polish['Brand'], 
+                                selected_polish['Shade Name'], selected_polish['Finish'], 
+                                selected_polish.get('Collection', '')
+                            )
+                            logging.debug(f"SQL parameters: {params}")
+                            
+                            try:
+                                cursor.execute('''
+                                INSERT INTO votes (number, brand, shade_name, finish, collection, 
+                                                 winner_number, winner_brand, winner_shade_name, 
+                                                 winner_finish, winner_collection)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ''', params)
+                                logging.debug(f"Successfully inserted vote for polish {polish['Number']}")
+                            except Exception as e:
+                                logging.error(f"Error inserting vote for polish {polish['Number']}: {str(e)}")
+                                raise
+                        
+                        conn.commit()
+                        logging.debug("Successfully committed all votes to database")
+                        
+                        # Get count after insert
+                        cursor.execute('SELECT COUNT(*) FROM votes')
+                        after_count = cursor.fetchone()[0]
+                        logging.debug(f"Votes count after insert: {after_count}")
+                        logging.debug(f"Number of votes added: {after_count - before_count}")
+                        
+                        # Verify the most recent vote
                         cursor.execute('''
-                        INSERT INTO votes (number, brand, shade_name, finish, collection, 
-                                         winner_number, winner_brand, winner_shade_name, 
-                                         winner_finish, winner_collection)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ''', (
-                            polish['Number'], polish['Brand'], polish['Shade Name'], 
-                            polish['Finish'], polish.get('Collection', ''),
-                            selected_polish['Number'], selected_polish['Brand'], 
-                            selected_polish['Shade Name'], selected_polish['Finish'], 
-                            selected_polish.get('Collection', '')
-                        ))
-                        logging.debug(f"Successfully inserted vote for polish {polish['Number']}")
-                    
-                    conn.commit()
-                    logging.debug("Successfully committed all votes to database")
-                    
-                    # Verify the vote is saved
-                    cursor.execute('SELECT COUNT(*) FROM votes')
-                    count = cursor.fetchone()[0]
-                    logging.debug(f"Total votes in database after commit: {count}")
-                    
-                    st.success(f"Vote recorded! Total votes: {count}")
-                    
-                except Exception as e:
-                    conn.rollback()
-                    logging.error(f"Error in record_vote: {str(e)}")
-                    st.error("Failed to record vote. Please try again.")
-                    raise
+                        SELECT number, brand, shade_name, winner_number, winner_brand, winner_shade_name
+                        FROM votes ORDER BY created_at DESC LIMIT 1
+                        ''')
+                        last_vote = cursor.fetchone()
+                        logging.debug(f"Most recent vote: {last_vote}")
+                        
+                        st.success(f"Vote recorded! Total votes: {after_count}")
+                        
+                    except Exception as e:
+                        conn.rollback()
+                        logging.error(f"Error in record_vote database operation: {str(e)}")
+                        st.error("Failed to record vote. Please try again.")
+                        raise
+                        
+        except Exception as e:
+            logging.error(f"Error getting database connection: {str(e)}")
+            st.error("Failed to connect to database. Please try again.")
+            raise
                     
     except Exception as e:
         logging.error(f"Error in record_vote: {str(e)}")
@@ -277,6 +387,41 @@ def display_statistics():
         hide_index=True,
         use_container_width=True
     )
+    
+    # Add dark mode styling
+    st.markdown("""
+    <style>
+    .stDataFrame {
+        background-color: var(--background-color);
+        color: var(--text-color);
+    }
+    .stDataFrame th {
+        background-color: var(--secondary-background-color);
+        color: var(--text-color);
+    }
+    .stDataFrame td {
+        color: var(--text-color);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+def cleanup_test_data():
+    """Remove any test data from the database"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    DELETE FROM votes 
+                    WHERE number = 'TEST' 
+                    AND brand = 'TEST' 
+                    AND shade_name = 'TEST'
+                """)
+                deleted_count = cursor.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logging.debug(f"Cleaned up {deleted_count} test records")
+    except Exception as e:
+        logging.error(f"Error cleaning up test data: {str(e)}")
 
 def verify_database():
     """Verify database connection and table structure"""
@@ -296,48 +441,40 @@ def verify_database():
                     logging.error("Votes table does not exist")
                     return False
                 
-                # Check if we can insert and read
-                test_data = {
-                    'number': 'TEST',
-                    'brand': 'TEST',
-                    'shade_name': 'TEST',
-                    'finish': 'TEST',
-                    'collection': 'TEST',
-                    'winner_number': 'TEST',
-                    'winner_brand': 'TEST',
-                    'winner_shade_name': 'TEST',
-                    'winner_finish': 'TEST',
-                    'winner_collection': 'TEST'
-                }
+                # Clean up any existing test data
+                cleanup_test_data()
                 
-                cursor.execute("""
-                    INSERT INTO votes (number, brand, shade_name, finish, collection,
-                                     winner_number, winner_brand, winner_shade_name,
-                                     winner_finish, winner_collection)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id;
-                """, tuple(test_data.values()))
-                
-                inserted_id = cursor.fetchone()[0]
-                conn.commit()
-                
-                cursor.execute("SELECT COUNT(*) FROM votes WHERE id = %s", (inserted_id,))
+                # Just check if we can read from the table
+                cursor.execute("SELECT COUNT(*) FROM votes")
                 count = cursor.fetchone()[0]
+                logging.debug(f"Database contains {count} votes")
                 
-                if count == 1:
-                    logging.debug("Database verification successful")
-                    return True
-                else:
-                    logging.error("Database verification failed: Could not read inserted data")
-                    return False
+                return True
                     
     except Exception as e:
         logging.error(f"Database verification failed: {str(e)}")
         return False
 
+def display_database():
+    st.subheader("Database View")
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM votes")
+        rows = cursor.fetchall()
+        
+        # Get column names from the cursor description
+        columns = [desc[0] for desc in cursor.description]
+        
+        # Convert to DataFrame for display
+        db_df = pd.DataFrame(rows, columns=columns)
+        
+        st.dataframe(db_df, hide_index=True, use_container_width=True)
+
 def main():
     # Initialize database and verify connection
     init_database()
+    cleanup_test_data()  # Clean up any test data before starting
     if not verify_database():
         st.error("Database initialization failed. Please check the logs.")
         return
@@ -466,18 +603,7 @@ def main():
             display_statistics()
     
     elif page == "Database":
-        st.subheader("Database View")
-        
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM votes")
-            rows = cursor.fetchall()
-            
-            # Convert to DataFrame for display
-            db_df = pd.DataFrame(rows, columns=['ID', 'Number', 'Brand', 'Shade Name', 'Finish', 'Collection', 
-                                                'Winner Number', 'Winner Brand', 'Winner Shade Name', 'Winner Finish', 'Winner Collection'])
-            
-            st.dataframe(db_df, hide_index=True, use_container_width=True)
+        display_database()
 
 if __name__ == "__main__":
     main() 
