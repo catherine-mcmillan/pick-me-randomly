@@ -227,100 +227,54 @@ def get_random_polishes(collection_df, used_numbers, count=5):
     return available_polishes.loc[random_indices]
 
 def record_vote(selected_polish, polishes):
+    """Record votes for all polishes in a round"""
     try:
         logging.debug("=== Starting record_vote function ===")
         logging.debug(f"Selected polish: {selected_polish}")
         logging.debug(f"All polishes in round: {polishes}")
         
-        # Validate input data
-        if not selected_polish or not isinstance(selected_polish, dict):
-            logging.error("Invalid selected_polish data")
-            st.error("Invalid selection data. Please try again.")
-            return
-        
-        if not polishes or not isinstance(polishes, list):
-            logging.error("Invalid polishes data")
-            st.error("Invalid polish data. Please try again.")
-            return
-        
         # Get database connection
-        try:
-            with get_db_connection() as conn:
-                with conn.cursor() as cursor:
-                    try:
-                        # Get current count before insert
-                        cursor.execute('SELECT COUNT(*) FROM votes')
-                        before_count = cursor.fetchone()[0]
-                        logging.debug(f"Votes count before insert: {before_count}")
-                        
-                        for polish in polishes:
-                            logging.debug(f"Processing vote for polish: {polish}")
-                            
-                            # Validate polish data
-                            required_fields = ['Number', 'Brand', 'Shade Name', 'Finish']
-                            if not all(field in polish for field in required_fields):
-                                logging.error(f"Missing required fields in polish data: {polish}")
-                                continue
-                            
-                            # Log the exact data being inserted
-                            logging.debug(f"Inserting vote for polish {polish['Number']} ({polish['Brand']} - {polish['Shade Name']})")
-                            logging.debug(f"Selected winner: {selected_polish['Number']} ({selected_polish['Brand']} - {selected_polish['Shade Name']})")
-                            
-                            # Log the exact SQL parameters being used
-                            params = (
-                                polish['Number'], polish['Brand'], polish['Shade Name'], 
-                                polish['Finish'], polish.get('Collection', ''),
-                                selected_polish['Number'], selected_polish['Brand'], 
-                                selected_polish['Shade Name'], selected_polish['Finish'], 
-                                selected_polish.get('Collection', '')
-                            )
-                            logging.debug(f"SQL parameters: {params}")
-                            
-                            try:
-                                cursor.execute('''
-                                INSERT INTO votes (number, brand, shade_name, finish, collection, 
-                                                 winner_number, winner_brand, winner_shade_name, 
-                                                 winner_finish, winner_collection)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ''', params)
-                                logging.debug(f"Successfully inserted vote for polish {polish['Number']}")
-                            except Exception as e:
-                                logging.error(f"Error inserting vote for polish {polish['Number']}: {str(e)}")
-                                raise
-                        
-                        conn.commit()
-                        logging.debug("Successfully committed all votes to database")
-                        
-                        # Get count after insert
-                        cursor.execute('SELECT COUNT(*) FROM votes')
-                        after_count = cursor.fetchone()[0]
-                        logging.debug(f"Votes count after insert: {after_count}")
-                        logging.debug(f"Number of votes added: {after_count - before_count}")
-                        
-                        # Verify the most recent vote
-                        cursor.execute('''
-                        SELECT number, brand, shade_name, winner_number, winner_brand, winner_shade_name
-                        FROM votes ORDER BY created_at DESC LIMIT 1
-                        ''')
-                        last_vote = cursor.fetchone()
-                        logging.debug(f"Most recent vote: {last_vote}")
-                        
-                        st.success(f"Vote recorded! Total votes: {after_count}")
-                        
-                    except Exception as e:
-                        conn.rollback()
-                        logging.error(f"Error in record_vote database operation: {str(e)}")
-                        st.error("Failed to record vote. Please try again.")
-                        raise
-                        
-        except Exception as e:
-            logging.error(f"Error getting database connection: {str(e)}")
-            st.error("Failed to connect to database. Please try again.")
-            raise
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Get current count before insert
+                cursor.execute('SELECT COUNT(*) FROM votes')
+                before_count = cursor.fetchone()[0]
+                logging.debug(f"Votes count before insert: {before_count}")
+                
+                for polish in polishes:
+                    logging.debug(f"Processing vote for polish: {polish}")
                     
+                    # Insert vote record
+                    cursor.execute('''
+                    INSERT INTO votes (
+                        number, brand, shade_name, finish, collection,
+                        winner_number, winner_brand, winner_shade_name, winner_finish, winner_collection
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (
+                        polish['Number'],
+                        polish['Brand'],
+                        polish['Shade Name'],
+                        polish['Finish'],
+                        polish.get('Collection', ''),
+                        selected_polish['Number'],
+                        selected_polish['Brand'],
+                        selected_polish['Shade Name'],
+                        selected_polish['Finish'],
+                        selected_polish.get('Collection', '')
+                    ))
+                
+                # Commit the transaction
+                conn.commit()
+                
+                # Get count after insert
+                cursor.execute('SELECT COUNT(*) FROM votes')
+                after_count = cursor.fetchone()[0]
+                logging.debug(f"Votes count after insert: {after_count}")
+                logging.debug(f"Number of votes added: {after_count - before_count}")
+                
     except Exception as e:
         logging.error(f"Error in record_vote: {str(e)}")
-        st.error("Failed to record vote. Please try again.")
+        raise
 
 def calculate_statistics():
     with get_db_connection() as conn:
@@ -471,6 +425,23 @@ def display_database():
         
         st.dataframe(db_df, hide_index=True, use_container_width=True)
 
+def vote(selected_polish, all_polishes):
+    """Handle the vote recording process"""
+    try:
+        logging.debug("=== Starting vote function ===")
+        logging.debug(f"Selected polish: {selected_polish}")
+        logging.debug(f"All polishes in round: {all_polishes}")
+        
+        # Record votes for all polishes in the round
+        record_vote(selected_polish, all_polishes)
+        
+        # Show success message
+        st.success("Vote recorded successfully!")
+        
+    except Exception as e:
+        logging.error(f"Error in vote function: {str(e)}")
+        st.error("Failed to record vote. Please try again.")
+
 def main():
     # Initialize database and verify connection
     init_database()
@@ -519,8 +490,8 @@ def main():
                     # Make button key unique by including the index
                     if st.button("Select this polish", key=f"select_{polish['Number']}_{i}"):
                         logging.debug(f"Button clicked for polish {polish['Number']}")
-                        logging.debug("Calling record_vote function")
-                        record_vote(polish, random_polishes.to_dict('records'))
+                        logging.debug("Calling vote function")
+                        vote(polish, random_polishes.to_dict('records'))
                         logging.debug("Vote recording completed")
                         st.success("Selection recorded! Refreshing...")
                         time.sleep(1)
