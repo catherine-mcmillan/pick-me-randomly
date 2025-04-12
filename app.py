@@ -432,15 +432,22 @@ def vote(selected_polish, all_polishes):
         logging.debug(f"Selected polish: {selected_polish}")
         logging.debug(f"All polishes in round: {all_polishes}")
         
+        # Validate input data
+        if not selected_polish or not isinstance(selected_polish, dict):
+            raise ValueError("Invalid selected polish data")
+            
+        if not all_polishes or not isinstance(all_polishes, list):
+            raise ValueError("Invalid polishes data")
+        
         # Record votes for all polishes in the round
         record_vote(selected_polish, all_polishes)
         
-        # Show success message
-        st.success("Vote recorded successfully!")
+        # Log success
+        logging.debug("Vote recording completed successfully")
         
     except Exception as e:
         logging.error(f"Error in vote function: {str(e)}")
-        st.error("Failed to record vote. Please try again.")
+        raise  # Re-raise the exception to be handled by the caller
 
 def main():
     # Initialize database and verify connection
@@ -487,15 +494,27 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Make button key unique by including the index
-                    if st.button("Select this polish", key=f"select_{polish['Number']}_{i}"):
-                        logging.debug(f"Button clicked for polish {polish['Number']}")
-                        logging.debug("Calling vote function")
-                        vote(polish, random_polishes.to_dict('records'))
-                        logging.debug("Vote recording completed")
-                        st.success("Selection recorded! Refreshing...")
-                        time.sleep(1)
-                        st.rerun()
+                    # Create a unique key for the button
+                    button_key = f"select_{polish['Number']}_{i}"
+                    
+                    # Check if this button was clicked
+                    if st.button("Select this polish", key=button_key):
+                        try:
+                            logging.debug(f"Button clicked for polish {polish['Number']}")
+                            logging.debug("Calling vote function")
+                            
+                            # Call the vote function with the selected polish and all polishes
+                            vote(polish, random_polishes.to_dict('records'))
+                            
+                            # Show success message
+                            st.success("Selection recorded! Refreshing...")
+                            
+                            # Force a rerun to show new random polishes
+                            st.rerun()
+                            
+                        except Exception as e:
+                            logging.error(f"Error in button click handler: {str(e)}")
+                            st.error("Failed to record vote. Please try again.")
     
     elif page == "History":
         _, _, _, history_df = load_data()
