@@ -23,6 +23,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Add custom CSS
+def load_css():
+    with open('static/style.css') as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+        # Add additional Streamlit-specific styles
+        st.markdown("""
+        <style>
+            /* Ensure styles are applied to all tabs */
+            div[data-testid="stTabs"] {
+                background-color: var(--background-color);
+            }
+            div[data-testid="stTabs"] button {
+                color: var(--text-color);
+            }
+            div[data-testid="stTabs"] button[aria-selected="true"] {
+                background-color: var(--accent-color);
+                color: var(--primary-color);
+            }
+        </style>
+        """, unsafe_allow_html=True)
+
+# Load CSS at startup
+load_css()
+
 # Constants
 COLLECTION_FILE = 'NPS.xlsx'
 SELECTIONS_FILE = 'NPS_Selections.xlsx'
@@ -226,6 +250,32 @@ def get_random_polishes(collection_df, used_numbers, count=5):
     random_indices = random.sample(list(available_polishes.index), count)
     return available_polishes.loc[random_indices]
 
+def vote(selected_polish, all_polishes):
+    """Handle the vote recording process"""
+    try:
+        logging.debug("=== Starting vote function ===")
+        logging.debug(f"Selected polish: {selected_polish}")
+        logging.debug(f"All polishes in round: {all_polishes}")
+        
+        # Validate input data
+        if not selected_polish or not isinstance(selected_polish, dict):
+            raise ValueError("Invalid selected polish data")
+            
+        if not all_polishes or not isinstance(all_polishes, list):
+            raise ValueError("Invalid polishes data")
+        
+        # Record votes for all polishes in the round
+        logging.debug("Calling record_vote function")
+        record_vote(selected_polish, all_polishes)
+        logging.debug("record_vote function completed")
+        
+        # Log success
+        logging.debug("Vote recording completed successfully")
+        
+    except Exception as e:
+        logging.error(f"Error in vote function: {str(e)}")
+        raise  # Re-raise the exception to be handled by the caller
+
 def record_vote(selected_polish, polishes):
     """Record votes for all polishes in a round"""
     try:
@@ -348,7 +398,8 @@ def display_statistics():
     # Display brand statistics
     st.write("### 📊 Brand Statistics 📊")
     brand_df = pd.DataFrame(brand_stats, columns=['Brand', 'Appearances', 'Wins'])
-    brand_df['Win Percentage'] = (brand_df['Wins'] / brand_df['Appearances']) * 100
+    brand_df['Win Percentage'] = (brand_df['Wins'] / brand_df['Appearances'] * 100).round(0).astype(int).astype(str) + '%'
+    brand_df = brand_df.sort_values('Win Percentage', ascending=False)
     st.dataframe(
         brand_df[['Brand', 'Appearances', 'Wins', 'Win Percentage']],
         hide_index=True,
@@ -358,7 +409,8 @@ def display_statistics():
     # Display finish statistics
     st.write("### 🎨 Finish Statistics 🎨")
     finish_df = pd.DataFrame(finish_stats, columns=['Finish', 'Appearances', 'Wins'])
-    finish_df['Win Percentage'] = (finish_df['Wins'] / finish_df['Appearances']) * 100
+    finish_df['Win Percentage'] = (finish_df['Wins'] / finish_df['Appearances'] * 100).round(0).astype(int).astype(str) + '%'
+    finish_df = finish_df.sort_values('Win Percentage', ascending=False)
     st.dataframe(
         finish_df[['Finish', 'Appearances', 'Wins', 'Win Percentage']],
         hide_index=True,
@@ -448,195 +500,219 @@ def display_database():
         
         st.dataframe(db_df, hide_index=True, use_container_width=True)
 
-def vote(selected_polish, all_polishes):
-    """Handle the vote recording process"""
-    try:
-        logging.debug("=== Starting vote function ===")
-        logging.debug(f"Selected polish: {selected_polish}")
-        logging.debug(f"All polishes in round: {all_polishes}")
-        
-        # Validate input data
-        if not selected_polish or not isinstance(selected_polish, dict):
-            raise ValueError("Invalid selected polish data")
-            
-        if not all_polishes or not isinstance(all_polishes, list):
-            raise ValueError("Invalid polishes data")
-        
-        # Record votes for all polishes in the round
-        logging.debug("Calling record_vote function")
-        record_vote(selected_polish, all_polishes)
-        logging.debug("record_vote function completed")
-        
-        # Log success
-        logging.debug("Vote recording completed successfully")
-        
-    except Exception as e:
-        logging.error(f"Error in vote function: {str(e)}")
-        raise  # Re-raise the exception to be handled by the caller
-
 def main():
-    # Initialize session state
-    if 'last_button_clicked' not in st.session_state:
-        st.session_state.last_button_clicked = None
-    
-    # Initialize database and verify connection
-    logging.debug("=== Starting main function ===")
-    logging.debug(f"Session state: {st.session_state}")
-    
-    init_database()
-    cleanup_test_data()  # Clean up any test data before starting
-    if not verify_database():
-        st.error("Database initialization failed. Please check the logs.")
-        return
-    
-    st.title("💅 Pick Me Randomly")
-    
-    # Sidebar navigation
-    page = st.sidebar.radio("Navigation", ["Vote", "History", "Statistics", "Database"])
-    logging.debug(f"Selected page: {page}")
-    
-    if page == "Vote":
+    """Main application function with clear sequencing"""
+    try:
+        # Initialize session state
+        if 'last_button_clicked' not in st.session_state:
+            st.session_state.last_button_clicked = None
+            st.session_state.current_polishes = None
+            st.session_state.selected_polish = None
+        
+        # Initialize database and verify connection
+        logging.debug("=== Starting main function ===")
+        logging.debug(f"Session state: {st.session_state}")
+        
+        # Step 1: Initialize database
+        init_database()
+        cleanup_test_data()
+        if not verify_database():
+            st.error("Database initialization failed. Please check the logs.")
+            return
+        
+        # Step 2: Set up page navigation
+        st.title("💅 Pick Me Randomly")
+        page = st.sidebar.radio("Navigation", ["Vote", "History", "Statistics", "Database"])
+        logging.debug(f"Selected page: {page}")
+        
+        if page == "Vote":
+            handle_vote_page()
+        elif page == "History":
+            handle_history_page()
+        elif page == "Statistics":
+            handle_statistics_page()
+        elif page == "Database":
+            handle_database_page()
+            
+    except Exception as e:
+        logging.error(f"Error in main function: {str(e)}")
+        st.error("An error occurred. Please try again or check the logs.")
+
+def handle_vote_page():
+    """Handle the vote page functionality"""
+    try:
         logging.debug("Loading data for Vote page")
         collection_df, _, used_numbers, _ = load_data()
-        random_polishes = get_random_polishes(collection_df, used_numbers)
-        logging.debug(f"Generated {len(random_polishes)} random polishes")
         
+        # Generate new polishes if none exist or if refresh is needed
+        if st.session_state.current_polishes is None:
+            st.session_state.current_polishes = get_random_polishes(collection_df, used_numbers)
+        
+        display_polishes(st.session_state.current_polishes)
+        
+    except Exception as e:
+        logging.error(f"Error in handle_vote_page: {str(e)}")
+        st.error("Failed to load vote page. Please try again.")
+
+def display_polishes(polishes):
+    """Display polish cards and handle button clicks"""
+    try:
         st.subheader("Select Your Favorite Polish")
         st.write("Choose from these randomly selected polishes:")
         
         # Create columns for polish cards
         cols = st.columns(3)
         
-        for i, polish in enumerate(random_polishes.to_dict('records')):
+        for i, polish in enumerate(polishes.to_dict('records')):
             with cols[i % 3]:
-                with st.container():
-                    # Only show Collection Info if Notes is not empty
-                    collection_info = f"<p><strong>Collection Info:</strong> {polish['Notes']}</p>" if polish['Notes'] else ""
-                    st.markdown(f"""
-                    <div style='
-                        padding: 20px; 
-                        border-radius: 10px; 
-                        background-color: var(--background-color);
-                        border: 1px solid var(--border-color);
-                        margin-bottom: 20px;
-                        color: var(--text-color);
-                    '>
-                        <h3 style='color: var(--text-color);'>{polish['Brand']}</h3>
-                        <p><strong style='color: var(--text-color);'>Shade:</strong> {polish['Shade Name']}</p>
-                        <p><strong style='color: var(--text-color);'>Finish:</strong> {polish['Finish']}</p>
-                        <p><strong style='color: var(--text-color);'>Description:</strong> {polish['Description']}</p>
-                        {collection_info}
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Create a unique key for the button
-                    button_key = f"select_{polish['Number']}_{i}"
-                    logging.debug(f"Created button with key: {button_key}")
-                    
-                    # Check if this button was clicked
-                    if st.button("Select this polish", key=button_key):
-                        try:
-                            logging.debug(f"Button clicked for polish {polish['Number']}")
-                            st.session_state.last_button_clicked = button_key
-                            logging.debug(f"Updated session state: {st.session_state}")
-                            
-                            # Log the data being passed to vote
-                            logging.debug(f"Selected polish data: {polish}")
-                            logging.debug(f"All polishes data: {random_polishes.to_dict('records')}")
-                            
-                            # Call the vote function with the selected polish and all polishes
-                            logging.debug("Calling vote function")
-                            vote(polish, random_polishes.to_dict('records'))
-                            logging.debug("Vote function completed")
-                            
-                            # Show success message
-                            st.success("Selection recorded! Refreshing...")
-                            
-                            # Force a rerun to show new random polishes
-                            st.rerun()
-                            
-                        except Exception as e:
-                            logging.error(f"Error in button click handler: {str(e)}")
-                            st.error("Failed to record vote. Please try again.")
+                display_polish_card(polish, i)
+                
+    except Exception as e:
+        logging.error(f"Error in display_polishes: {str(e)}")
+        st.error("Failed to display polishes. Please try again.")
+
+def display_polish_card(polish, index):
+    """Display a single polish card and handle its button click"""
+    try:
+        with st.container():
+            # Only show Collection Info if Notes is not empty
+            collection_info = f"<p><strong>Collection Info:</strong> {polish['Notes']}</p>" if polish['Notes'] else ""
+            st.markdown(f"""
+            <div style='
+                padding: 20px; 
+                border-radius: 10px; 
+                background-color: var(--background-color);
+                border: 1px solid var(--border-color);
+                margin-bottom: 20px;
+                color: var(--text-color);
+            '>
+                <h3 style='color: var(--text-color);'>{polish['Brand']}</h3>
+                <p><strong style='color: var(--text-color);'>Shade:</strong> {polish['Shade Name']}</p>
+                <p><strong style='color: var(--text-color);'>Finish:</strong> {polish['Finish']}</p>
+                <p><strong style='color: var(--text-color);'>Description:</strong> {polish['Description']}</p>
+                {collection_info}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Create a unique key for the button
+            button_key = f"select_{polish['Number']}_{index}"
+            logging.debug(f"Created button with key: {button_key}")
+            
+            # Handle button click
+            if st.button("Select this polish", key=button_key):
+                handle_polish_selection(polish, st.session_state.current_polishes.to_dict('records'))
+                
+    except Exception as e:
+        logging.error(f"Error in display_polish_card: {str(e)}")
+        st.error("Failed to display polish card. Please try again.")
+
+def handle_polish_selection(selected_polish, all_polishes):
+    """Handle the selection of a polish"""
+    try:
+        logging.debug(f"Button clicked for polish {selected_polish['Number']}")
+        st.session_state.last_button_clicked = selected_polish['Number']
+        st.session_state.selected_polish = selected_polish
+        
+        # Log the data being passed to vote
+        logging.debug(f"Selected polish data: {selected_polish}")
+        logging.debug(f"All polishes data: {all_polishes}")
+        
+        # Call the vote function with the selected polish and all polishes
+        logging.debug("Calling vote function")
+        vote(selected_polish, all_polishes)
+        logging.debug("Vote function completed")
+        
+        # Show success message
+        st.success("Selection recorded! Refreshing...")
+        
+        # Clear current polishes to generate new ones
+        st.session_state.current_polishes = None
+        
+        # Force a rerun to show new random polishes
+        st.rerun()
+        
+    except Exception as e:
+        logging.error(f"Error in handle_polish_selection: {str(e)}")
+        st.error("Failed to record vote. Please try again.")
+
+def handle_history_page():
+    _, _, _, history_df = load_data()
     
-    elif page == "History":
-        _, _, _, history_df = load_data()
-        
-        st.subheader("Kat's Personal Selection History")
-        
-        if not history_df.empty:
-            # Add filters
-            col1, col2 = st.columns(2)
-            with col1:
-                # Get unique brands, excluding 'Unknown' and sort them
-                unique_brands = [brand for brand in sorted(history_df['Brand'].unique()) if brand != 'Unknown']
-                brand_filter = st.multiselect(
-                    "Filter by Brand",
-                    options=unique_brands,
-                    default=[]
-                )
-            with col2:
-                date_filter = st.date_input(
-                    "Filter by Date",
-                    value=None
-                )
-            
-            # Apply filters
-            filtered_data = history_df
-            if brand_filter:
-                filtered_data = filtered_data[filtered_data['Brand'].isin(brand_filter)]
-            if date_filter:
-                filtered_data = filtered_data[filtered_data['Date'].dt.date == date_filter]
-            
-            # Display the filtered data
-            st.dataframe(
-                filtered_data[['Date', 'Brand', 'Shade Name', 'Description', 'Finish', 'Notes']],
-                column_config={
-                    "Date": st.column_config.DatetimeColumn(
-                        "Date",
-                        format="D MMM YYYY"
-                    )
-                },
-                hide_index=True,
-                use_container_width=True
+    st.subheader("Kat's Personal Selection History")
+    
+    if not history_df.empty:
+        # Add filters
+        col1, col2 = st.columns(2)
+        with col1:
+            # Get unique brands, excluding 'Unknown' and sort them
+            unique_brands = [brand for brand in sorted(history_df['Brand'].unique()) if brand != 'Unknown']
+            brand_filter = st.multiselect(
+                "Filter by Brand",
+                options=unique_brands,
+                default=[]
             )
-        else:
-            st.info("No selection history available yet.")
+        with col2:
+            date_filter = st.date_input(
+                "Filter by Date",
+                value=None
+            )
+        
+        # Apply filters
+        filtered_data = history_df
+        if brand_filter:
+            filtered_data = filtered_data[filtered_data['Brand'].isin(brand_filter)]
+        if date_filter:
+            filtered_data = filtered_data[filtered_data['Date'].dt.date == date_filter]
+        
+        # Display the filtered data
+        st.dataframe(
+            filtered_data[['Date', 'Brand', 'Shade Name', 'Description', 'Finish', 'Notes']],
+            column_config={
+                "Date": st.column_config.DatetimeColumn(
+                    "Date",
+                    format="D MMM YYYY"
+                )
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No selection history available yet.")
+
+def handle_statistics_page():
+    # Calculate and display basic statistics at the top
+    st.write("### 🌟 Kat's Personal Collection and Usage Journey 🌟")
+    st.write("brought to you by /r/WeGotPolishatHome")
+    collection_df, _, _, history_df = load_data()
+    total_polishes = len(collection_df)
+    worn_polishes = history_df['Number'].nunique()
+    percent_worn = (worn_polishes / total_polishes) * 100
+    total_days = (history_df['Date'].max() - history_df['Date'].min()).days
+    polishes_per_week = worn_polishes / (total_days / 7)
+    weeks_to_wear_collection = total_polishes / polishes_per_week
+    years_to_wear_collection = weeks_to_wear_collection / 52
     
-    elif page == "Statistics":
-        # Calculate and display basic statistics at the top
-        st.write("### 🌟 Kat's Personal Collection and Usage Journey 🌟")
-        st.write("brought to you by /r/WeGotPolishatHome")
-        collection_df, _, _, history_df = load_data()
-        total_polishes = len(collection_df)
-        worn_polishes = history_df['Number'].nunique()
-        percent_worn = (worn_polishes / total_polishes) * 100
-        total_days = (history_df['Date'].max() - history_df['Date'].min()).days
-        polishes_per_week = worn_polishes / (total_days / 7)
-        weeks_to_wear_collection = total_polishes / polishes_per_week
-        years_to_wear_collection = weeks_to_wear_collection / 52
-        
-        st.markdown(f"""
-        <div style='background-color: #f0f8ff; padding: 20px; border-radius: 10px;'>
-            <h4>Polishes in Collection Worn: {worn_polishes}</h4>
-            <h4>Total Polishes in Collection: {total_polishes}</h4>
-            <h4>Percent of Collection Worn: {percent_worn:.2f}%</h4>
-            <h4>Total Days of Polish: {total_days}</h4>
-            <h4>Polishes/Week: {polishes_per_week:.2f}</h4>
-            <h4>Weeks to Wear Collection: {weeks_to_wear_collection:.2f}</h4>
-            <h4>Years to Wear Collection: {years_to_wear_collection:.2f}</h4>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Visual separator
-        st.markdown("---")
-        
-        # Sync button
-        if st.button("Calculate Favorites"):
-            display_statistics()
+    st.markdown(f"""
+    <div style='background-color: #f0f8ff; padding: 20px; border-radius: 10px;'>
+        <h4>Polishes in Collection Worn: {worn_polishes}</h4>
+        <h4>Total Polishes in Collection: {total_polishes}</h4>
+        <h4>Percent of Collection Worn: {percent_worn:.2f}%</h4>
+        <h4>Total Days of Polish: {total_days}</h4>
+        <h4>Polishes/Week: {polishes_per_week:.2f}</h4>
+        <h4>Weeks to Wear Collection: {weeks_to_wear_collection:.2f}</h4>
+        <h4>Years to Wear Collection: {years_to_wear_collection:.2f}</h4>
+    </div>
+    """, unsafe_allow_html=True)
     
-    elif page == "Database":
-        display_database()
+    # Visual separator
+    st.markdown("---")
+    
+    # Sync button
+    if st.button("Calculate Favorites"):
+        display_statistics()
+
+def handle_database_page():
+    display_database()
 
 if __name__ == "__main__":
     main() 

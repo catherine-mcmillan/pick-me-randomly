@@ -1,35 +1,238 @@
+:root {
+    --primary-color: #0a1045;
+    --accent-color: #00c2d1;
+    --highlight-color: #f9e900;
+    --secondary-color: #f6af65;
+    --accent-highlight: #ed33b9;
+    --text-color: #0a1045;
+    --background-color: #ffffff;
+    --secondary-background: #f8f9fa;
+    --border-color: #00c2d1;
+}
+
 body {
-    background-color: #f8f9fa;
+    background-color: var(--secondary-background);
+    color: var(--text-color);
+    font-family: 'Arial', sans-serif;
 }
 
 .navbar {
+    background-color: var(--primary-color);
     margin-bottom: 2rem;
+    padding: 1rem;
+    border-radius: 8px;
+}
+
+.navbar-brand {
+    color: var(--highlight-color) !important;
+    font-weight: bold;
 }
 
 .card {
     transition: transform 0.2s;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 4px rgba(10, 16, 69, 0.1);
+    border: 1px solid var(--border-color);
+    background-color: var(--background-color);
 }
 
 .card:hover {
     transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(10, 16, 69, 0.2);
 }
 
 .btn-primary {
-    background-color: #6c5ce7;
-    border-color: #6c5ce7;
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--primary-color);
 }
 
 .btn-primary:hover {
-    background-color: #5b4bc4;
-    border-color: #5b4bc4;
+    background-color: var(--highlight-color);
+    border-color: var(--highlight-color);
+    color: var(--primary-color);
 }
 
 .table th {
-    background-color: #6c5ce7;
-    color: white;
+    background-color: var(--primary-color);
+    color: var(--highlight-color);
 }
 
 .lead {
-    color: #6c5ce7;
+    color: var(--accent-color);
+}
+
+/* Custom styles for polish cards */
+.polish-card {
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.polish-card h3 {
+    color: var(--primary-color);
+}
+
+.polish-card p {
+    color: var(--text-color);
+}
+
+/* Success and error messages */
+.success-message {
+    background-color: var(--highlight-color);
+    color: var(--primary-color);
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+
+.error-message {
+    background-color: var(--accent-highlight);
+    color: var(--background-color);
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+
+/* Statistics section */
+.statistics-card {
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.statistics-card h4 {
+    color: var(--primary-color);
+}
+
+/* Database view */
+.database-view {
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .card {
+        margin-bottom: 1rem;
+    }
+
+    .polish-card {
+        padding: 0.5rem;
+    }
+}
+
+/* Streamlit-specific styles */
+.stApp {
+    background-color: var(--secondary-background);
+    color: var(--text-color);
+    font-family: 'Arial', sans-serif;
+}
+
+/* Main content area */
+.main .block-container {
+    max-width: 100%;
+    padding: 2rem;
+}
+
+/* Sidebar */
+.sidebar .sidebar-content {
+    background-color: var(--primary-color);
+    color: var(--highlight-color);
+}
+
+/* Cards and containers */
+.stDataFrame,
+.stTable {
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+/* Headers */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    color: var(--primary-color);
+}
+
+/* Buttons */
+.stButton>button {
+    background-color: var(--accent-color);
+    color: var(--primary-color);
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    transition: all 0.2s;
+}
+
+.stButton>button:hover {
+    background-color: var(--highlight-color);
+    color: var(--primary-color);
+}
+
+/* Tables */
+.stDataFrame th {
+    background-color: var(--primary-color);
+    color: var(--highlight-color);
+}
+
+.stDataFrame td {
+    color: var(--text-color);
+}
+
+/* Statistics cards */
+.statistics-card {
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* Success and error messages */
+.stAlert {
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+
+.stAlert.success {
+    background-color: var(--highlight-color);
+    color: var(--primary-color);
+}
+
+.stAlert.error {
+    background-color: var(--accent-highlight);
+    color: var(--background-color);
+}
+
+/* Polish cards */
+.polish-card {
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .main .block-container {
+        padding: 1rem;
+    }
+
+    .polish-card {
+        padding: 0.5rem;
+    }
 }
